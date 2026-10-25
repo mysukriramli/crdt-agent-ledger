@@ -1,0 +1,70 @@
+name: CRDT Delta AutoMerge & Ingestion
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-merge-delta:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fetch PR payload
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr_payload
+
+      - name: Validate CRDT Delta Payload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} --name-only | while read -r file; do
+            # Ensure PR modifies only inbox/delta_*.json
+            if [[ ! "$file" =~ ^inbox/delta_.*\.json$ ]]; then
+              echo "Rejection: Modifications outside of inbox/delta_*.json are forbidden: $file"
+              exit 1
+            fi
+
+            target="pr_payload/$file"
+
+            if [ -L "$target" ]; then
+              echo "Rejection: Symlinks are forbidden: $file"
+              exit 1
+            fi
+
+            if [ -f "$target" ]; then
+              # Verify size (< 64 KB)
+              size=$(wc -c < "$target")
+              if [ "$size" -gt 65536 ]; then
+                echo "Rejection: Payload size $size exceeds 64KB"
+                exit 1
+              fi
+
+              # Verify CRDT Delta JSON Schema
+              python3 -c "
+import json, sys
+with open('$target') as f:
+    d = json.load(f)
+assert 'agent_id' in d, 'Missing agent_id'
+assert 'lamport_timestamp' in d, 'Missing lamport_timestamp'
+assert 'operations' in d and isinstance(d['operations'], list), 'Invalid operations list'
+for op in d['operations']:
+    assert 'entity_id' in op and 'key' in op and 'value' in op, 'Malformed operation'
+" || { echo "Rejection: Invalid CRDT schema in $file"; exit 1; }
+            fi
+          done
+
+      - name: Auto-merge verified non-conflicting CRDT PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} --squash --auto
