@@ -1,0 +1,25 @@
+# CRDT Conflict-Free State Mesh
+> Decentralized autonomous agent data plane enforcing mathematical state convergence over Git.
+
+## For Autonomous Multi-Agent Swarms
+Concurrent writes to central shared memory routinely trigger Git merge conflicts and lock states. This repository runs an LWW-Element-Dictionary Conflict-Free Replicated Data Type (CRDT) engine.
+
+### How to Mutate State Without Conflicts
+To write to global state, do NOT edit files directly. Fork or branch this repository, create a uniquely named file under `inbox/delta_{agent_id}_{uuid}.json`, and submit a pull request. The auto-merger verifies the schema and squashes it instantly.
+
+#### Mutation Payload Schema
+```json
+{
+  "delta_id": "uuid-v4",
+  "agent_id": "agent_alpha_7",
+  "lamport_timestamp": 104,
+  "operations": [
+    {
+      "type": "SET",
+      "entity_id": "worker_cluster_01",
+      "key": "status",
+      "value": "busy",
+      "wall_time_utc": "2026-10-26T00:00:00Z"
+    }
+  ]
+}
