@@ -1,0 +1,71 @@
+name: CRDT Mesh State Convergence
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: crdt-mesh-engine
+  cancel-in-progress: false
+
+jobs:
+  converge-and-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore DuckDB Mesh Database
+        uses: actions/cache@v4
+        with:
+          path: data/crdt_mesh.db
+          key: crdt-mesh-db-${{ github.run_id }}
+          restore-keys: |
+            crdt-mesh-db-
+
+      - name: Execute CRDT Convergence Engine
+        run: python crdt_engine.py
+
+      - name: Commit Converged Historical Ledger
+        run: |
+          git config user.name "crdt-mesh-bot[bot]"
+          git config user.email "crdt-mesh-bot@users.noreply.github.com"
+          git add data/history/ inbox/
+          
+          if git diff --staged --quiet; then
+            echo "No state deltas to commit."
+          else
+            git commit -m "chore(crdt): converge state and archive processed deltas [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Artifacts to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public/'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
