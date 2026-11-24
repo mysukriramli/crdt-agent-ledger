@@ -17,11 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  converge-and-publish:
+  converge-and-build:
+    name: Converge and Build
     runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,51 +33,88 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
       - name: Restore DuckDB Mesh Database
         uses: actions/cache@v4
         with:
           path: data/crdt_mesh.db
-          key: crdt-mesh-db-${{ github.run_id }}
+          key: crdt-mesh-db-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            crdt-mesh-db-${{ runner.os }}-${{ github.ref_name }}-
             crdt-mesh-db-
 
       - name: Execute CRDT Convergence Engine
-        run: python crdt_engine.py
-
-      - name: Commit Converged Historical Ledger
         run: |
-          git config user.name "crdt-mesh-bot[bot]"
-          git config user.email "crdt-mesh-bot@users.noreply.github.com"
-          git add data/history/ inbox/
-          
-          if git diff --staged --quiet; then
-            echo "No state deltas to commit."
-          else
-            git commit -m "chore(crdt): converge state and archive processed deltas [skip ci]"
-            git pull --rebase origin main
-            git push origin main
-          fi
-
-      - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
+          mkdir -p data public
+          python crdt_engine.py
 
       - name: Ensure public directory is non-empty
         run: |
           mkdir -p public
           touch public/.nojekyll
-          # Guarantee at least one visible file so tar does not skip the directory
-          if [ -z "$(ls -A public | grep -v '^\.')" ]; then
-            echo "CRDT Mesh State Convergence - Active ($(date -u))" > public/index.html
+          if [ ! -s public/index.html ]; then
+            cat << 'EOF' > public/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>CRDT Mesh State Convergence</title>
+          </head>
+          <body>
+            <h1>CRDT Mesh State Convergence</h1>
+            <p>State convergence pipeline active.</p>
+          </body>
+          </html>
+          EOF
           fi
           ls -la public
 
-      - name: Upload Artifacts to Pages
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: 'public'
+      - name: Commit Converged Historical Ledger
+        run: |
+          git config user.name "crdt-mesh-bot[bot]"
+          git config user.email "crdt-mesh-bot@users.noreply.github.com"
 
+          [ -d data/history ] && git add data/history/ || true
+          [ -d inbox ] && git add inbox/ || true
+          [ -d public ] && git add public/ || true
+
+          if git diff --staged --quiet; then
+            echo "No state deltas to commit."
+          else
+            git commit -m "chore(crdt): converge state and archive processed deltas [skip ci]"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Artifacts to Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: converge-and-build
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Deployment Summary
+        run: |
+          echo "CRDT Mesh State Convergence — Deployment Complete"
+          echo "${{ steps.deployment.outputs.page_url }}"
