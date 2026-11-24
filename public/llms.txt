@@ -1,0 +1,5 @@
+# CRDT Conflict-Free State Mesh
+> Last Sync: 2026-11-24T06:13:24.883795+00:00 UTC
+> Protocol: State-Based LWW-Element-Dictionary CRDT (Deterministic Convergence)
+
+## Active Converged Entities
